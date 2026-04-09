@@ -1,9 +1,73 @@
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
-#include <stdio.h>
 
+#include <nfd.h>
+#include <stdio.h>
 #include <GLFW/glfw3.h>
+
+#define N_RECENT_PROJECTS 5
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+typedef struct Image {
+    int width;
+    int height;
+    GLuint texture;
+    bool available;
+    struct Image* next;
+}image;
+
+// Simple helper function to load an image into a OpenGL texture with common settings
+bool LoadTextureFromMemory(const void* data, size_t data_size, GLuint* out_texture, int* out_width, int* out_height)
+{
+    // Load from file
+    int image_width = 0;
+    int image_height = 0;
+    unsigned char* image_data = stbi_load_from_memory((const unsigned char*)data, (int)data_size, &image_width, &image_height, NULL, 4);
+    if (image_data == NULL)
+        return false;
+
+    // Create a OpenGL texture identifier
+    GLuint image_texture;
+    glGenTextures(1, &image_texture);
+    glBindTexture(GL_TEXTURE_2D, image_texture);
+
+    // Setup filtering parameters for display
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    // Upload pixels into texture
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image_width, image_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image_data);
+    stbi_image_free(image_data);
+
+    *out_texture = image_texture;
+    *out_width = image_width;
+    *out_height = image_height;
+
+    return true;
+}
+
+// Open and read a file, then forward to LoadTextureFromMemory()
+bool LoadTextureFromFile(const char* file_name, GLuint* out_texture, int* out_width, int* out_height)
+{
+    FILE* f = fopen(file_name, "rb");
+    if (f == NULL)
+        return false;
+    fseek(f, 0, SEEK_END);
+    size_t file_size = (size_t)ftell(f);
+    if (file_size == -1)
+        return false;
+    fseek(f, 0, SEEK_SET);
+    void* file_data = IM_ALLOC(file_size);
+    fread(file_data, 1, file_size, f);
+    fclose(f);
+    bool ret = LoadTextureFromMemory(file_data, file_size, out_texture, out_width, out_height);
+    IM_FREE(file_data);
+    return ret;
+}
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -11,17 +75,27 @@ static void glfw_error_callback(int error, const char* description)
 }
 
 int main(int, char**)
-{
+{   
     glfwSetErrorCallback(glfw_error_callback);
     if (!glfwInit())
         return 1;
 
+    if (NFD_Init() != NFD_OKAY)
+        return 1;
+
     float main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor()); // Valid on GLFW 3.3+ only
-    GLFWwindow* window = glfwCreateWindow((int)(1280 * main_scale), (int)(800 * main_scale), "Dear ImGui GLFW+OpenGL3 example", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow((int)(1280 * main_scale), (int)(800 * main_scale), "SGE", nullptr, nullptr);
     if (window == nullptr)
         return 1;
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1); // Enable vsync
+
+    // Setup NFDe context
+    nfdu8char_t *outPath;
+    nfdu8filteritem_t filters[1] = { { "Image Files", "png,jpg,jpeg" } };
+    nfdopendialogu8args_t args = {0};
+    args.filterList = filters;
+    args.filterCount = 1;
 
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
@@ -58,9 +132,14 @@ int main(int, char**)
     //IM_ASSERT(font != nullptr);
 
     // Our state
-    bool show_demo_window = true;
-    bool show_another_window = false;
+    bool show_demo_window = false;
+    bool show_files_window = true;
+    char *recent_projects[N_RECENT_PROJECTS];
+    int recent_project_count = 0;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+
+    // Image Loading
+    image image_window;
 
     while (!glfwWindowShouldClose(window)){
         // Poll and handle events (inputs, window resize, etc.)
@@ -79,42 +158,52 @@ int main(int, char**)
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+
+        if(ImGui::BeginMainMenuBar()) {
+            if (ImGui::BeginMenu("File"))
+            {
+                if (ImGui::MenuItem("New Project")) {}
+                if (ImGui::MenuItem("Open Sprite Sheet")) {
+                    nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
+                    if (result == NFD_OKAY)
+                    {
+                        image_window.available = LoadTextureFromFile(outPath, &image_window.texture, &image_window.width, &image_window.height);
+                        NFD_FreePathU8(outPath);
+                    }
+                }
+                if (ImGui::BeginMenu("Open Recent")) {
+                    if (recent_project_count == 0){
+                        ImGui::MenuItem("No recent project.", NULL, false, false);
+                    }
+                    for(int i = 0; i < recent_project_count; i++) {
+                        if (ImGui::MenuItem(recent_projects[i])) {
+                            // open_project();
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Test Windows"))
+            {
+                if (ImGui::MenuItem("Open Imgui Demo")) show_demo_window = true;
+                ImGui::EndMenu();
+            }
+            ImGui::Text("%.1f FPS (average %.2f ms/frame)", io.Framerate, 1000.0f / io.Framerate);
+            ImGui::EndMainMenuBar();
+        }
+
+        if (image_window.available){
+            ImGui::Begin("OpenGL Texture Text", &image_window.available);
+            ImGui::Text("pointer = %x", image_window.texture);
+            ImGui::Text("size = %d x %d", image_window.width, image_window.height);
+            ImGui::Image((ImTextureID)(intptr_t)image_window.texture, ImVec2(image_window.width, image_window.height));
+            ImGui::End();
+        }
+
         // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
         if (show_demo_window)
-            ImGui::ShowDemoWindow(); // Show demo window! :)
-
-        // 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
-        {
-            static float f = 0.0f;
-            static int counter = 0;
-
-            ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
-
-            ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-            ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
-            ImGui::Checkbox("Another Window", &show_another_window);
-
-            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
-
-            if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
-                counter++;
-            ImGui::SameLine();
-            ImGui::Text("counter = %d", counter);
-
-            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-            ImGui::End();
-        }
-
-        // 3. Show another simple window.
-        if (show_another_window)
-        {
-            ImGui::Begin("Another Window", &show_another_window);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
-            ImGui::Text("Hello from another window!");
-            if (ImGui::Button("Close Me"))
-                show_another_window = false;
-            ImGui::End();
-        }
+            ImGui::ShowDemoWindow(&show_demo_window); // Show demo window! :)
     
         // Rendering
         ImGui::Render();
@@ -132,6 +221,8 @@ int main(int, char**)
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
+
+    NFD_Quit();
 
     glfwDestroyWindow(window);
     glfwTerminate();
