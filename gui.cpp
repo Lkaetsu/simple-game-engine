@@ -4,6 +4,7 @@
 
 #include <nfd.h>
 #include <stdio.h>
+#include <string>
 #include <GLFW/glfw3.h>
 
 #define N_RECENT_PROJECTS 5
@@ -15,8 +16,8 @@ typedef struct Image {
     int width;
     int height;
     GLuint texture;
-    bool available;
-    struct Image* next;
+    bool available = false;
+    std::string path;
 }image;
 
 // Simple helper function to load an image into a OpenGL texture with common settings
@@ -139,7 +140,10 @@ int main(int, char**)
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
     // Image Loading
-    image image_window;
+    image spritesheets[10];
+    int tileWidth = 32;
+    int tileHeight = 32;
+    int selectedTile = -1;
 
     while (!glfwWindowShouldClose(window)){
         // Poll and handle events (inputs, window resize, etc.)
@@ -167,21 +171,34 @@ int main(int, char**)
                     nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
                     if (result == NFD_OKAY)
                     {
-                        image_window.available = LoadTextureFromFile(outPath, &image_window.texture, &image_window.width, &image_window.height);
+                        int i = 0, free_index = -1;
+                        for(; i < 10; i++) {
+                            if (!spritesheets[i].available && free_index == -1){
+                                free_index = i;
+                            }
+                            if (spritesheets[i].path.compare(outPath) == 0) {
+                                free_index = -1;
+                                break;
+                            }
+                        }
+                        if (free_index != -1) {
+                            spritesheets[free_index].available = LoadTextureFromFile(outPath, &spritesheets[free_index].texture, &spritesheets[free_index].width, &spritesheets[free_index].height);
+                            spritesheets[free_index].path = outPath;
+                        }
                         NFD_FreePathU8(outPath);
                     }
                 }
-                if (ImGui::BeginMenu("Open Recent")) {
-                    if (recent_project_count == 0){
-                        ImGui::MenuItem("No recent project.", NULL, false, false);
-                    }
-                    for(int i = 0; i < recent_project_count; i++) {
-                        if (ImGui::MenuItem(recent_projects[i])) {
-                            // open_project();
-                        }
-                    }
-                    ImGui::EndMenu();
-                }
+                // if (ImGui::BeginMenu("Open Recent")) {
+                //     if (recent_project_count == 0){
+                //         ImGui::MenuItem("No recent project.", NULL, false, false);
+                //     }
+                //     for(int i = 0; i < recent_project_count; i++) {
+                //         if (ImGui::MenuItem(recent_projects[i])) {
+                //             // open_project();
+                //         }
+                //     }
+                //     ImGui::EndMenu();
+                // }
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Test Windows"))
@@ -193,13 +210,34 @@ int main(int, char**)
             ImGui::EndMainMenuBar();
         }
 
-        if (image_window.available){
-            ImGui::Begin("OpenGL Texture Text", &image_window.available);
-            ImGui::Text("pointer = %x", image_window.texture);
-            ImGui::Text("size = %d x %d", image_window.width, image_window.height);
-            ImGui::Image((ImTextureID)(intptr_t)image_window.texture, ImVec2(image_window.width, image_window.height));
-            ImGui::End();
+        int tileIndex = 0;
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(3.0f, 3.0f));
+        for (int i = 0; i < 9; i++) {
+            if (spritesheets[i].available){
+                ImGui::Begin(spritesheets[i].path.c_str(), &spritesheets[i].available);
+                ImGui::Text("pointer = %x", spritesheets[i].texture);
+                ImGui::Text("size = %d x %d", spritesheets[i].width, spritesheets[i].height);
+                ImGui::Text("selected tile = %d", selectedTile);
+                for (int j = 0; j < spritesheets[i].height; j+=tileHeight){
+                    for (int k = 0; k < spritesheets[i].width; k+=tileWidth){
+                        ImGui::PushID(tileIndex);
+                        ImVec2 uv0 = ImVec2((float)k / spritesheets[i].width, (float)j / spritesheets[i].height);
+                        ImVec2 uv1 = ImVec2((float)(tileWidth + k) / spritesheets[i].width, float(tileHeight + j) / spritesheets[i].height);
+                        if(ImGui::ImageButton("", (ImTextureID)(intptr_t)spritesheets[i].texture, ImVec2((float)tileWidth, (float)tileHeight), uv0, uv1)){
+                            selectedTile = tileIndex;
+                        }
+                        ImGui::PopID();
+                        ImGui::SameLine();
+                        tileIndex++;
+                    }
+                    ImGui::NewLine();
+                }
+                ImGui::End();
+            }
         }
+        ImGui::PopStyleVar();
+        ImGui::PopStyleVar();
 
         // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
         if (show_demo_window)
