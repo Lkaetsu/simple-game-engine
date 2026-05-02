@@ -12,13 +12,19 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-typedef struct Image {
+typedef struct {
     int width;
     int height;
     GLuint texture;
     bool available = false;
-    std::string path;
-}image;
+    std::string path = "";
+} image;
+
+typedef struct {
+    ImVec2 uv0;
+    ImVec2 uv1;
+    image img;
+} tile;
 
 // Simple helper function to load an image into a OpenGL texture with common settings
 bool LoadTextureFromMemory(const void* data, size_t data_size, GLuint* out_texture, int* out_width, int* out_height)
@@ -134,7 +140,7 @@ int main(int, char**)
 
     // Our state
     bool show_demo_window = false;
-    bool show_files_window = true;
+    bool show_game_window = true;
     char *recent_projects[N_RECENT_PROJECTS];
     int recent_project_count = 0;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
@@ -143,7 +149,11 @@ int main(int, char**)
     image spritesheets[10];
     int tileWidth = 32;
     int tileHeight = 32;
-    int selectedTile = -1;
+    int mapSize[2] = {16, 16};
+    tile spriteTiles[255];
+    int selectedTile;
+
+    int mapMatrix[32][32] = {};
 
     while (!glfwWindowShouldClose(window)){
         // Poll and handle events (inputs, window resize, etc.)
@@ -210,7 +220,7 @@ int main(int, char**)
             ImGui::EndMainMenuBar();
         }
 
-        int tileIndex = 0;
+        int tileIndex = 1;
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(3.0f, 3.0f));
         for (int i = 0; i < 9; i++) {
@@ -224,6 +234,9 @@ int main(int, char**)
                         ImGui::PushID(tileIndex);
                         ImVec2 uv0 = ImVec2((float)k / spritesheets[i].width, (float)j / spritesheets[i].height);
                         ImVec2 uv1 = ImVec2((float)(tileWidth + k) / spritesheets[i].width, float(tileHeight + j) / spritesheets[i].height);
+                        spriteTiles[tileIndex].uv0 = uv0;
+                        spriteTiles[tileIndex].uv1 = uv1;
+                        spriteTiles[tileIndex].img = spritesheets[i];
                         if(ImGui::ImageButton("", (ImTextureID)(intptr_t)spritesheets[i].texture, ImVec2((float)tileWidth, (float)tileHeight), uv0, uv1)){
                             selectedTile = tileIndex;
                         }
@@ -238,6 +251,63 @@ int main(int, char**)
         }
         ImGui::PopStyleVar();
         ImGui::PopStyleVar();
+
+        tileIndex = 0;
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+        if (show_game_window) {
+            ImGui::Begin("Testing Screen", &show_game_window);
+            ImVec2 scrolling(0.0f, 0.0f);
+            ImGui::SliderInt2("Map Size(w,h)", mapSize, 1, 32, NULL);
+
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+            ImGui::BeginChild("canvas", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoMove);
+            ImGui::PopStyleVar();
+            ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();
+            ImGuiIO& io = ImGui::GetIO();
+            ImVec2 canvas_p1 = ImVec2(canvas_p0.x + tileWidth * mapSize[0], canvas_p0.y + tileHeight * mapSize[1]);
+            ImDrawList* draw_list = ImGui::GetWindowDrawList();
+            draw_list->AddRectFilled(canvas_p0, canvas_p1, IM_COL32(50, 50, 50, 255));
+            draw_list->AddRect(canvas_p0, canvas_p1, IM_COL32(255, 255, 255, 255));
+            
+            ImGui::InvisibleButton("##CanvasButton", ImVec2(tileWidth * mapSize[0], tileHeight * mapSize[1]), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+            const bool is_hovered = ImGui::IsItemHovered();
+            const ImVec2 origin(canvas_p0.x + scrolling.x, canvas_p0.y + scrolling.y);
+            const ImVec2 mouse_pos_in_canvas(io.MousePos.x - origin.x, io.MousePos.y - origin.y);
+            if (is_hovered && selectedTile > -1 && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                mapMatrix[(int)mouse_pos_in_canvas.y / tileHeight][(int)mouse_pos_in_canvas.x / tileWidth] = selectedTile;
+            }
+            if (is_hovered && ImGui::IsMouseDown(ImGuiMouseButton_Right))
+            {
+                mapMatrix[(int)mouse_pos_in_canvas.y / tileHeight][(int)mouse_pos_in_canvas.x / tileWidth] = 0;
+            }
+            
+            for (int i = 0; i < mapSize[1]; i++){
+                for (int j = 0; j < mapSize[0]; j++){
+                    // ImGui::PushID(tileIndex);
+                    if (mapMatrix[i][j] != 0) {
+                        draw_list->AddImage(
+                        // ImGui::Image(
+                            (ImTextureID)(intptr_t)spriteTiles[mapMatrix[i][j]].img.texture,
+                            ImVec2(origin.x + j * tileWidth, origin.y + i * tileHeight),
+                            ImVec2(origin.x + (j + 1) * tileWidth, origin.y + (i + 1) * tileHeight),
+                            spriteTiles[mapMatrix[i][j]].uv0,
+                            spriteTiles[mapMatrix[i][j]].uv1
+                        );
+                    }
+                    ImGui::SameLine();
+                    // ImGui::PopID();
+                    tileIndex++;
+                }
+                ImGui::NewLine();
+            }
+            // draw_list->PopClipRect();
+            ImGui::EndChild();
+            ImGui::End();
+        }
+        ImGui::PopStyleVar();
+        ImGui::PopStyleVar();
+        
 
         // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
         if (show_demo_window)
