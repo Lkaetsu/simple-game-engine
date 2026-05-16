@@ -4,27 +4,47 @@
 
 #include <nfd.h>
 #include <stdio.h>
+#include <iostream>
+#include <fstream>
 #include <string>
 #include <GLFW/glfw3.h>
 
 #define N_RECENT_PROJECTS 5
+#define MAX_MAP_SIZE 32
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
 typedef struct {
+    int tileID = -1;
+    ImVec2 uv0;
+    ImVec2 uv1;
+} sprite;
+
+typedef struct {
+    int spriteSheetID = 0;
     int width;
     int height;
     GLuint texture;
-    bool available = false;
+    bool show = false;
     std::string path = "";
+    sprite sprites[64];
 } image;
 
 typedef struct {
-    ImVec2 uv0;
-    ImVec2 uv1;
-    image img;
-} tile;
+    int map[2][MAX_MAP_SIZE][MAX_MAP_SIZE] = {};
+    int size[2] = {16, 16};
+    sprite usedTiles[255] = {};
+    std::string saveFile = "";
+} map;
+
+map init_map (){
+    map new_map = {};
+
+    return new_map;
+}
+
+image spritesheets[10] = {};
 
 // Simple helper function to load an image into a OpenGL texture with common settings
 bool LoadTextureFromMemory(const void* data, size_t data_size, GLuint* out_texture, int* out_width, int* out_height)
@@ -76,6 +96,35 @@ bool LoadTextureFromFile(const char* file_name, GLuint* out_texture, int* out_wi
     return ret;
 }
 
+void empty_spritesheets() {
+    for (int i = 0; i < 10; i++) {
+        spritesheets[i].spriteSheetID = 0;
+        spritesheets[i].show = 0;
+    }
+}
+
+bool load_spritesheet(std::string path) {
+    int free_index = -1;
+    for(int i = 0; i < 10; i++) {
+        if (spritesheets[i].spriteSheetID == 0){
+            free_index = i;
+            break;
+        } else if (spritesheets[i].path.compare(path) == 0) {
+            free_index = -1;
+            break;
+        }
+    }
+    if (free_index != -1) {
+        spritesheets[free_index].show = LoadTextureFromFile(path.c_str(), &spritesheets[free_index].texture, &spritesheets[free_index].width, &spritesheets[free_index].height);
+        spritesheets[free_index].path = path;
+        spritesheets[free_index].spriteSheetID = free_index + 1; 
+    } else {
+        printf("File is already open or there is no more space spritesheet slots.");
+        return 0;
+    }
+    return 1;
+}
+
 static void glfw_error_callback(int error, const char* description)
 {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
@@ -99,10 +148,14 @@ int main(int, char**)
 
     // Setup NFDe context
     nfdu8char_t *outPath;
-    nfdu8filteritem_t filters[1] = { { "Image Files", "png,jpg,jpeg" } };
-    nfdopendialogu8args_t args = {0};
-    args.filterList = filters;
-    args.filterCount = 1;
+    nfdu8filteritem_t imageFilters[1] = { { "Image Files", "png,jpg,jpeg" } };
+    nfdu8filteritem_t mapFilters[1] = { { "Map File", "sgem" } };
+    nfdopendialogu8args_t openImageArgs = {0};
+    nfdopendialogu8args_t openMapArgs = {0};
+    openImageArgs.filterList = imageFilters;
+    openMapArgs.filterList = mapFilters;
+    openImageArgs.filterCount = 1;
+    openMapArgs.filterCount = 1;
 
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
@@ -141,19 +194,12 @@ int main(int, char**)
     // Our state
     bool show_demo_window = false;
     bool show_game_window = true;
-    char *recent_projects[N_RECENT_PROJECTS];
-    int recent_project_count = 0;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-
-    // Image Loading
-    image spritesheets[10];
     int tileWidth = 32;
     int tileHeight = 32;
-    int mapSize[2] = {16, 16};
-    tile spriteTiles[255];
-    int selectedTile;
-
-    int mapMatrix[32][32] = {};
+    int selectedTile[2] = {-1, -1};
+    map currentMap = {};
+    std::string savePath = "";
 
     while (!glfwWindowShouldClose(window)){
         // Poll and handle events (inputs, window resize, etc.)
@@ -176,27 +222,79 @@ int main(int, char**)
         if(ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("File"))
             {
-                if (ImGui::MenuItem("New Project")) {}
+                if (ImGui::MenuItem("New Map")) {
+                    currentMap = init_map();
+                    empty_spritesheets();
+                    show_game_window = true;
+                }
                 if (ImGui::MenuItem("Open Sprite Sheet")) {
-                    nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
+                    nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &openImageArgs);
                     if (result == NFD_OKAY)
                     {
-                        int i = 0, free_index = -1;
-                        for(; i < 10; i++) {
-                            if (!spritesheets[i].available && free_index == -1){
-                                free_index = i;
-                            }
-                            if (spritesheets[i].path.compare(outPath) == 0) {
-                                free_index = -1;
-                                break;
-                            }
-                        }
-                        if (free_index != -1) {
-                            spritesheets[free_index].available = LoadTextureFromFile(outPath, &spritesheets[free_index].texture, &spritesheets[free_index].width, &spritesheets[free_index].height);
-                            spritesheets[free_index].path = outPath;
-                        }
+                        load_spritesheet(outPath);
                         NFD_FreePathU8(outPath);
                     }
+                }
+                if (ImGui::MenuItem("Open Map File")) {
+                    nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &openMapArgs);
+                    if (result == NFD_OKAY)
+                    {
+                        empty_spritesheets();
+                        std::ifstream file(outPath);
+                        std::string line;
+                        std::string filename = "";
+                        int j = -1, k = 0;
+                        bool readingFilename = 0;
+                        bool readingMap = 0;
+
+                        if (!file.is_open()){
+                            printf("Error: Could not open file.\n");
+                            return 1;
+                        }
+                        while(std::getline(file, line)) {
+                            for(int i = 0; i < line.length(); i++) {
+                                if (readingMap) {
+                                    if (line[i] == ',' && line[i - 1] != ')'){
+                                        currentMap.map[0][j][k] = (line[i - 1] - '0');
+                                        i++;
+                                        for (int l = 0; l < 3 && line[i + l] != ')'; l++) {
+                                            filename += line[i + l];
+                                        }
+                                        currentMap.map[1][j][k] = atoi(filename.c_str());
+                                        filename = "";
+                                        k++;
+                                    }
+                                    continue;
+                                }
+                                if (readingFilename) {
+                                    if (line[i] == '\"') break;
+                                    filename += line[i];
+                                    continue;
+                                }
+                                if(line[i] == '=') {
+                                    if (line[i - 3] != 'm'){
+                                        readingFilename = 1;
+                                        i++;
+                                    } else {
+                                        readingMap = 1;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (readingFilename) {
+                                load_spritesheet(filename);
+                                readingFilename = 0;
+                                filename = "";
+                            }
+                            if (readingMap) {
+                                k = 0;
+                                j++;
+                            }
+                        }
+                        file.close();
+                        savePath = outPath;
+                    }
+                    NFD_FreePathU8(outPath);
                 }
                 // if (ImGui::BeginMenu("Open Recent")) {
                 //     if (recent_project_count == 0){
@@ -209,6 +307,48 @@ int main(int, char**)
                 //     }
                 //     ImGui::EndMenu();
                 // }
+                if (ImGui::MenuItem("Save", NULL, false, savePath != "")) {
+                    FILE* file = std::fopen(savePath.c_str(), "w");
+                    if (file != nullptr){
+                        for (int i = 0; i < 10 && spritesheets[i].spriteSheetID > 0; i++){
+                            std::fprintf(file, "SprSh[%d]=\"%s\";\n", i, spritesheets[i].path.c_str());
+                        }
+                        std::fputs("map=[\n", file);
+                        for (int i = 0; i < currentMap.size[1]; i++) {
+                            std::fputs("[", file);
+                            for (int j = 0; j < currentMap.size[0]; j++){
+                                std::fprintf(file, "(%d,%d),", currentMap.map[0][i][j], currentMap.map[1][i][j]);
+                            }
+                            std::fputs("]\n", file);
+                        }
+                        std::fputs("]", file);
+                        std::fclose(file);
+                    }
+                }
+                if (ImGui::MenuItem("Save As...")) {
+                    nfdresult_t result = NFD_SaveDialog(&outPath, mapFilters, 1, NULL, "map0.sgem");
+                    if (result == NFD_OKAY)
+                    {
+                        FILE* file = std::fopen(outPath, "w");
+                        if (file != nullptr){
+                            for (int i = 0; i < 10 && spritesheets[i].spriteSheetID > 0; i++){
+                                std::fprintf(file, "SprSh[%d]=\"%s\";\n", i, spritesheets[i].path.c_str());
+                            }
+                            std::fputs("map=[\n", file);
+                            for (int i = 0; i < currentMap.size[1]; i++) {
+                                std::fputs("[", file);
+                                for (int j = 0; j < currentMap.size[0]; j++){
+                                    std::fprintf(file, "(%d, %d),", currentMap.map[0][i][j], currentMap.map[1][i][j]);
+                                }
+                                std::fputs("]\n", file);
+                            }
+                            std::fputs("]", file);
+                            std::fclose(file);
+                            savePath = outPath;
+                        }
+                    }
+                    NFD_FreePathU8(outPath);
+                }
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Test Windows"))
@@ -221,24 +361,27 @@ int main(int, char**)
         }
 
         int tileIndex = 1;
+        int offSet = 1;
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(3.0f, 3.0f));
         for (int i = 0; i < 9; i++) {
-            if (spritesheets[i].available){
-                ImGui::Begin(spritesheets[i].path.c_str(), &spritesheets[i].available);
+            if (spritesheets[i].show){
+                ImGui::Begin(spritesheets[i].path.c_str(), &spritesheets[i].show);
                 ImGui::Text("pointer = %x", spritesheets[i].texture);
                 ImGui::Text("size = %d x %d", spritesheets[i].width, spritesheets[i].height);
-                ImGui::Text("selected tile = %d", selectedTile);
+                ImGui::Text("selected tile = (sh%d, t%d)", selectedTile[0], selectedTile[1]);
                 for (int j = 0; j < spritesheets[i].height; j+=tileHeight){
                     for (int k = 0; k < spritesheets[i].width; k+=tileWidth){
                         ImGui::PushID(tileIndex);
+                        int offsetIndex = tileIndex - offSet;
                         ImVec2 uv0 = ImVec2((float)k / spritesheets[i].width, (float)j / spritesheets[i].height);
                         ImVec2 uv1 = ImVec2((float)(tileWidth + k) / spritesheets[i].width, float(tileHeight + j) / spritesheets[i].height);
-                        spriteTiles[tileIndex].uv0 = uv0;
-                        spriteTiles[tileIndex].uv1 = uv1;
-                        spriteTiles[tileIndex].img = spritesheets[i];
+                        spritesheets[i].sprites[offsetIndex].tileID = offsetIndex; 
+                        spritesheets[i].sprites[offsetIndex].uv0 = uv0;
+                        spritesheets[i].sprites[offsetIndex].uv1 = uv1;
                         if(ImGui::ImageButton("", (ImTextureID)(intptr_t)spritesheets[i].texture, ImVec2((float)tileWidth, (float)tileHeight), uv0, uv1)){
-                            selectedTile = tileIndex;
+                            selectedTile[0] = i + 1;
+                            selectedTile[1] = offsetIndex;
                         }
                         ImGui::PopID();
                         ImGui::SameLine();
@@ -247,61 +390,57 @@ int main(int, char**)
                     ImGui::NewLine();
                 }
                 ImGui::End();
+                offSet += spritesheets[i].width >> 5 + spritesheets[i].height >> 5;
             }
         }
         ImGui::PopStyleVar();
         ImGui::PopStyleVar();
 
-        tileIndex = 0;
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
         if (show_game_window) {
             ImGui::Begin("Testing Screen", &show_game_window);
             ImVec2 scrolling(0.0f, 0.0f);
-            ImGui::SliderInt2("Map Size(w,h)", mapSize, 1, 32, NULL);
+            ImGui::SliderInt2("Map Size(w,h)", currentMap.size, 1, 32, NULL);
 
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
             ImGui::BeginChild("canvas", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoMove);
             ImGui::PopStyleVar();
             ImVec2 canvas_p0 = ImGui::GetCursorScreenPos();
             ImGuiIO& io = ImGui::GetIO();
-            ImVec2 canvas_p1 = ImVec2(canvas_p0.x + tileWidth * mapSize[0], canvas_p0.y + tileHeight * mapSize[1]);
+            ImVec2 canvas_p1 = ImVec2(canvas_p0.x + tileWidth * currentMap.size[0], canvas_p0.y + tileHeight * currentMap.size[1]);
             ImDrawList* draw_list = ImGui::GetWindowDrawList();
             draw_list->AddRectFilled(canvas_p0, canvas_p1, IM_COL32(50, 50, 50, 255));
             draw_list->AddRect(canvas_p0, canvas_p1, IM_COL32(255, 255, 255, 255));
             
-            ImGui::InvisibleButton("##CanvasButton", ImVec2(tileWidth * mapSize[0], tileHeight * mapSize[1]), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+            ImGui::InvisibleButton("##CanvasButton", ImVec2(tileWidth * currentMap.size[0], tileHeight * currentMap.size[1]), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
             const bool is_hovered = ImGui::IsItemHovered();
             const ImVec2 origin(canvas_p0.x + scrolling.x, canvas_p0.y + scrolling.y);
             const ImVec2 mouse_pos_in_canvas(io.MousePos.x - origin.x, io.MousePos.y - origin.y);
-            if (is_hovered && selectedTile > -1 && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-                mapMatrix[(int)mouse_pos_in_canvas.y / tileHeight][(int)mouse_pos_in_canvas.x / tileWidth] = selectedTile;
+            if (is_hovered && selectedTile[0] > 0 && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                currentMap.map[0][(int)mouse_pos_in_canvas.y >> 5][(int)mouse_pos_in_canvas.x >> 5] = selectedTile[0];
+                currentMap.map[1][(int)mouse_pos_in_canvas.y >> 5][(int)mouse_pos_in_canvas.x >> 5] = selectedTile[1];
             }
             if (is_hovered && ImGui::IsMouseDown(ImGuiMouseButton_Right))
             {
-                mapMatrix[(int)mouse_pos_in_canvas.y / tileHeight][(int)mouse_pos_in_canvas.x / tileWidth] = 0;
+                currentMap.map[0][(int)mouse_pos_in_canvas.y >> 5][(int)mouse_pos_in_canvas.x >> 5] = 0;
             }
             
-            for (int i = 0; i < mapSize[1]; i++){
-                for (int j = 0; j < mapSize[0]; j++){
-                    // ImGui::PushID(tileIndex);
-                    if (mapMatrix[i][j] != 0) {
+            for (int i = 0; i < currentMap.size[1]; i++){
+                for (int j = 0; j < currentMap.size[0]; j++){
+                    if (currentMap.map[0][i][j] > 0) {
                         draw_list->AddImage(
-                        // ImGui::Image(
-                            (ImTextureID)(intptr_t)spriteTiles[mapMatrix[i][j]].img.texture,
+                            (ImTextureID)(intptr_t)spritesheets[currentMap.map[0][i][j] - 1].texture,
                             ImVec2(origin.x + j * tileWidth, origin.y + i * tileHeight),
                             ImVec2(origin.x + (j + 1) * tileWidth, origin.y + (i + 1) * tileHeight),
-                            spriteTiles[mapMatrix[i][j]].uv0,
-                            spriteTiles[mapMatrix[i][j]].uv1
+                            spritesheets[currentMap.map[0][i][j] - 1].sprites[currentMap.map[1][i][j]].uv0,
+                            spritesheets[currentMap.map[0][i][j] - 1].sprites[currentMap.map[1][i][j]].uv1
                         );
                     }
                     ImGui::SameLine();
-                    // ImGui::PopID();
-                    tileIndex++;
                 }
                 ImGui::NewLine();
             }
-            // draw_list->PopClipRect();
             ImGui::EndChild();
             ImGui::End();
         }
