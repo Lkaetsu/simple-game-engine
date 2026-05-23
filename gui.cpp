@@ -10,6 +10,7 @@
 #include <GLFW/glfw3.h>
 
 #define N_RECENT_PROJECTS 5
+#define MAP_LAYERS 3
 #define MAX_MAP_SIZE 32
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -32,10 +33,11 @@ typedef struct {
 } image;
 
 typedef struct {
-    int map[2][MAX_MAP_SIZE][MAX_MAP_SIZE] = {};
+    int map[2][MAX_MAP_SIZE][MAX_MAP_SIZE][3] = {};
     int size[2] = {16, 16};
-    sprite usedTiles[255] = {};
     std::string saveFile = "";
+    int currentLayer = 0;
+    int showLayers = 7;
 } map;
 
 map init_map (){
@@ -123,6 +125,29 @@ bool load_spritesheet(std::string path) {
         return 0;
     }
     return 1;
+}
+
+bool saveMapState(const char* savePath, map map){
+    FILE* file = std::fopen(savePath, "w");
+    if (file == nullptr) return false;
+
+    for (int i = 0; i < 10 && spritesheets[i].spriteSheetID > 0; i++){
+        std::fprintf(file, "SprSh[%d]=\"%s\";\n", i, spritesheets[i].path.c_str());
+    }
+    for(int k = 0; k < MAP_LAYERS; k++){
+        std::fputs("map=[\n", file);
+        for (int i = 0; i < map.size[1]; i++) {
+            std::fputs("[", file);
+            for (int j = 0; j < map.size[0]; j++){
+                std::fprintf(file, "(%d,%d),", map.map[0][i][j][k], map.map[1][i][j][k]);
+            }
+            std::fputs("]\n", file);
+        }
+        std::fputs("]\n", file);
+    }
+    std::fclose(file);
+
+    return true;
 }
 
 static void glfw_error_callback(int error, const char* description)
@@ -246,21 +271,23 @@ int main(int, char**)
                         int j = -1, k = 0;
                         bool readingFilename = 0;
                         bool readingMap = 0;
+                        int layer = -1;
 
                         if (!file.is_open()){
                             printf("Error: Could not open file.\n");
                             return 1;
                         }
                         while(std::getline(file, line)) {
+                            if (line[0] == ']') readingMap = 0;
                             for(int i = 0; i < line.length(); i++) {
                                 if (readingMap) {
                                     if (line[i] == ',' && line[i - 1] != ')'){
-                                        currentMap.map[0][j][k] = (line[i - 1] - '0');
+                                        currentMap.map[0][j][k][layer] = (line[i - 1] - '0');
                                         i++;
                                         for (int l = 0; l < 3 && line[i + l] != ')'; l++) {
                                             filename += line[i + l];
                                         }
-                                        currentMap.map[1][j][k] = atoi(filename.c_str());
+                                        currentMap.map[1][j][k][layer] = atoi(filename.c_str());
                                         filename = "";
                                         k++;
                                     }
@@ -277,6 +304,8 @@ int main(int, char**)
                                         i++;
                                     } else {
                                         readingMap = 1;
+                                        layer++;
+                                        j = -1;
                                         break;
                                     }
                                 }
@@ -290,6 +319,7 @@ int main(int, char**)
                                 k = 0;
                                 j++;
                             }
+                            if (layer > MAP_LAYERS) break;
                         }
                         file.close();
                         savePath = outPath;
@@ -308,44 +338,14 @@ int main(int, char**)
                 //     ImGui::EndMenu();
                 // }
                 if (ImGui::MenuItem("Save", NULL, false, savePath != "")) {
-                    FILE* file = std::fopen(savePath.c_str(), "w");
-                    if (file != nullptr){
-                        for (int i = 0; i < 10 && spritesheets[i].spriteSheetID > 0; i++){
-                            std::fprintf(file, "SprSh[%d]=\"%s\";\n", i, spritesheets[i].path.c_str());
-                        }
-                        std::fputs("map=[\n", file);
-                        for (int i = 0; i < currentMap.size[1]; i++) {
-                            std::fputs("[", file);
-                            for (int j = 0; j < currentMap.size[0]; j++){
-                                std::fprintf(file, "(%d,%d),", currentMap.map[0][i][j], currentMap.map[1][i][j]);
-                            }
-                            std::fputs("]\n", file);
-                        }
-                        std::fputs("]", file);
-                        std::fclose(file);
-                    }
+                    saveMapState(savePath.c_str(), currentMap);
                 }
                 if (ImGui::MenuItem("Save As...")) {
                     nfdresult_t result = NFD_SaveDialog(&outPath, mapFilters, 1, NULL, "map0.sgem");
                     if (result == NFD_OKAY)
                     {
-                        FILE* file = std::fopen(outPath, "w");
-                        if (file != nullptr){
-                            for (int i = 0; i < 10 && spritesheets[i].spriteSheetID > 0; i++){
-                                std::fprintf(file, "SprSh[%d]=\"%s\";\n", i, spritesheets[i].path.c_str());
-                            }
-                            std::fputs("map=[\n", file);
-                            for (int i = 0; i < currentMap.size[1]; i++) {
-                                std::fputs("[", file);
-                                for (int j = 0; j < currentMap.size[0]; j++){
-                                    std::fprintf(file, "(%d, %d),", currentMap.map[0][i][j], currentMap.map[1][i][j]);
-                                }
-                                std::fputs("]\n", file);
-                            }
-                            std::fputs("]", file);
-                            std::fclose(file);
-                            savePath = outPath;
-                        }
+                        saveMapState(outPath, currentMap);
+                        savePath = outPath;
                     }
                     NFD_FreePathU8(outPath);
                 }
@@ -379,7 +379,7 @@ int main(int, char**)
                         spritesheets[i].sprites[offsetIndex].tileID = offsetIndex; 
                         spritesheets[i].sprites[offsetIndex].uv0 = uv0;
                         spritesheets[i].sprites[offsetIndex].uv1 = uv1;
-                        if(ImGui::ImageButton("", (ImTextureID)(intptr_t)spritesheets[i].texture, ImVec2((float)tileWidth, (float)tileHeight), uv0, uv1)){
+                        if(ImGui::ImageButton("", (ImTextureID)(intptr_t)spritesheets[i].texture, ImVec2(tileWidth, tileHeight), uv0, uv1)){
                             selectedTile[0] = i + 1;
                             selectedTile[1] = offsetIndex;
                         }
@@ -401,7 +401,23 @@ int main(int, char**)
         if (show_game_window) {
             ImGui::Begin("Testing Screen", &show_game_window);
             ImVec2 scrolling(0.0f, 0.0f);
+            ImGui::Text("Layers:");
+            ImGui::NewLine();
+            for (int i = 0; i < MAP_LAYERS; i++){
+                ImGui::PushID(i);
+                ImGui::Text("Layer %d", i + 1);
+                ImGui::SameLine();
+                if(ImGui::Button("act")) {
+                    currentMap.showLayers ^= 1 << i;
+                }
+                ImGui::SameLine();
+                if(ImGui::Button("cur")) {
+                    currentMap.currentLayer = i;
+                }
+                ImGui::PopID();
+            }
             ImGui::SliderInt2("Map Size(w,h)", currentMap.size, 1, 32, NULL);
+            ImGui::NewLine();
 
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
             ImGui::BeginChild("canvas", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoMove);
@@ -418,24 +434,27 @@ int main(int, char**)
             const ImVec2 origin(canvas_p0.x + scrolling.x, canvas_p0.y + scrolling.y);
             const ImVec2 mouse_pos_in_canvas(io.MousePos.x - origin.x, io.MousePos.y - origin.y);
             if (is_hovered && selectedTile[0] > 0 && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-                currentMap.map[0][(int)mouse_pos_in_canvas.y >> 5][(int)mouse_pos_in_canvas.x >> 5] = selectedTile[0];
-                currentMap.map[1][(int)mouse_pos_in_canvas.y >> 5][(int)mouse_pos_in_canvas.x >> 5] = selectedTile[1];
+                currentMap.map[0][(int)mouse_pos_in_canvas.y >> 5][(int)mouse_pos_in_canvas.x >> 5][currentMap.currentLayer] = selectedTile[0];
+                currentMap.map[1][(int)mouse_pos_in_canvas.y >> 5][(int)mouse_pos_in_canvas.x >> 5][currentMap.currentLayer] = selectedTile[1];
             }
             if (is_hovered && ImGui::IsMouseDown(ImGuiMouseButton_Right))
             {
-                currentMap.map[0][(int)mouse_pos_in_canvas.y >> 5][(int)mouse_pos_in_canvas.x >> 5] = 0;
+                currentMap.map[0][(int)mouse_pos_in_canvas.y >> 5][(int)mouse_pos_in_canvas.x >> 5][currentMap.currentLayer] = 0;
             }
             
             for (int i = 0; i < currentMap.size[1]; i++){
                 for (int j = 0; j < currentMap.size[0]; j++){
-                    if (currentMap.map[0][i][j] > 0) {
-                        draw_list->AddImage(
-                            (ImTextureID)(intptr_t)spritesheets[currentMap.map[0][i][j] - 1].texture,
-                            ImVec2(origin.x + j * tileWidth, origin.y + i * tileHeight),
-                            ImVec2(origin.x + (j + 1) * tileWidth, origin.y + (i + 1) * tileHeight),
-                            spritesheets[currentMap.map[0][i][j] - 1].sprites[currentMap.map[1][i][j]].uv0,
-                            spritesheets[currentMap.map[0][i][j] - 1].sprites[currentMap.map[1][i][j]].uv1
-                        );
+                    for(int k = 0; k < MAP_LAYERS; k++){
+                        if (!(currentMap.showLayers & (1 << k))) continue;
+                        if (currentMap.map[0][i][j][k] > 0) {
+                            draw_list->AddImage(
+                                (ImTextureID)(intptr_t)spritesheets[currentMap.map[0][i][j][k] - 1].texture,
+                                ImVec2(origin.x + j * tileWidth, origin.y + i * tileHeight),
+                                ImVec2(origin.x + (j + 1) * tileWidth, origin.y + (i + 1) * tileHeight),
+                                spritesheets[currentMap.map[0][i][j][k] - 1].sprites[currentMap.map[1][i][j][k]].uv0,
+                                spritesheets[currentMap.map[0][i][j][k] - 1].sprites[currentMap.map[1][i][j][k]].uv1
+                            );
+                        }
                     }
                     ImGui::SameLine();
                 }
