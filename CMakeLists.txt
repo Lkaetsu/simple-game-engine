@@ -41,8 +41,7 @@ set(SOURCES
 add_executable(SGE ${SOURCES})
 
 # 3. Define included directories
-target_include_directories(SGE PRIVATE "_deps/imgui-src" "external_headers")
-
+target_include_directories(SGE PRIVATE "_deps/imgui-src" "external_headers" "headers")
 
 # 4. Link Libraries
 target_link_libraries(SGE PRIVATE glfw opengl32 nfd)
