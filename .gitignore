@@ -6,3 +6,4 @@ cmake_install.cmake
 imgui.ini
 *.o
 *.exe
+*-backup

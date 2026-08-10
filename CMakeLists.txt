@@ -38,10 +38,10 @@ set(SOURCES
     _deps/imgui-src/backends/imgui_impl_glfw.cpp
     _deps/imgui-src/backends/imgui_impl_opengl3.cpp
 )
-add_executable(SGE ${SOURCES})
+add_executable(MapEditor ${SOURCES})
 
 # 3. Define included directories
-target_include_directories(SGE PRIVATE "_deps/imgui-src" "external_headers" "headers")
+target_include_directories(MapEditor PRIVATE "_deps/imgui-src" "external_headers" "mapEditorHeaders")
 
 # 4. Link Libraries
-target_link_libraries(SGE PRIVATE glfw opengl32 nfd)
+target_link_libraries(MapEditor PRIVATE glfw opengl32 nfd)
