@@ -14,7 +14,6 @@ typedef struct Texture2D {
     GLuint wrap_t = GL_REPEAT;
     GLuint filter_min = GL_LINEAR;
     GLuint filter_max = GL_LINEAR;
-    bool show = false; // ImGui window flag
 } texture2D;
 
 typedef struct {
@@ -22,18 +21,18 @@ typedef struct {
     GLuint VAO;
 } SpriteRenderer;
 
-void generateTexture2D(texture2D *texture, GLuint width, GLuint height, unsigned char* data) {
-    if (texture->texture_id == 0) glGenTextures(1, &texture->texture_id);
-    texture->width = width;
-    texture->height = height;
+void generateTexture2D(texture2D &texture, GLuint width, GLuint height, unsigned char* data) {
+    if (texture.texture_id == 0) glGenTextures(1, &texture.texture_id);
+    texture.width = width;
+    texture.height = height;
 
-    glBindTexture(GL_TEXTURE_2D, texture->texture_id);
-    glTexImage2D(GL_TEXTURE_2D, 0, texture->internal_format, width, height, 0, texture->image_format, GL_UNSIGNED_BYTE, data);
+    glBindTexture(GL_TEXTURE_2D, texture.texture_id);
+    glTexImage2D(GL_TEXTURE_2D, 0, texture.internal_format, width, height, 0, texture.image_format, GL_UNSIGNED_BYTE, data);
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, texture->wrap_s);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, texture->wrap_t);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, texture->filter_min);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, texture->filter_max);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, texture.wrap_s);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, texture.wrap_t);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, texture.filter_min);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, texture.filter_max);
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
@@ -75,14 +74,14 @@ void drawSprite(
     glm::mat4 model = glm::mat4(1.0f);
     model = glm::translate(model, glm::vec3(position, 0.0f)); // first translate (transformations are: scale happens first, then rotation, and then final translation happens; reversed order)
     model = glm::translate(model, glm::vec3(0.5f * size.x, 0.5f * size.y, 0.0f)); // move origin of rotation to center of the quad
-    model = glm::rotate(model, glm::radians(rotate), glm::vec3(0.0f, 0.0f, 0.0f)); // rotate
+    model = glm::rotate(model, glm::radians(rotate), glm::vec3(0.0f, 0.0f, 1.0f)); // rotate
     model = glm::translate(model, glm::vec3(-0.5f * size.x, -0.5f * size.y, 0.0f)); // move origin back
     model = glm::scale(model, glm::vec3(size, 1.0f));
 
     setShaderMatrix4(spr.shader, "model", model);
     setShaderVector3f(spr.shader, "spriteColor", color.x, color.y, color.z);
-    setShaderVector2f(spr.shader, "spriteSize", spriteSize.x, spriteSize.y);
-    setShaderVector2f(spr.shader, "spriteOffset", spriteOffset.x, spriteOffset.y);
+    setShaderVector2f(spr.shader, "spriteSize", spriteSize.x / tex.width, spriteSize.y / tex.height);
+    setShaderVector2f(spr.shader, "spriteOffset", spriteOffset.x / tex.width, spriteOffset.y / tex.height);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, tex.texture_id);
