@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(simpleGameEngine)
+project(SGEMapEditor)
 
 # 1. Download and include dependencies 
 include(FetchContent)
