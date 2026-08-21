@@ -13,13 +13,27 @@
 #include "canvas.h"
 #include "resource_manager.h"
 
+enum CollisionAreaType {
+    RECTANGULAR, CIRCULAR
+};
+
+enum Direction {
+    UP,
+    RIGHT,
+    DOWN,
+    LEFT
+};
+
+typedef std::tuple<bool, Direction, glm::vec2> Collision;
+
 typedef struct {
     glm::vec2 position = glm::vec2(0.0f, 0.0f);
     glm::vec2 size = glm::vec2(1.0f, 1.0f);
     glm::vec2 spriteOffset = glm::vec2(0.0f, 0.0f);
     glm::vec2 spriteSize = glm::vec2(32.0f, 32.0f);
     glm::vec3 color = glm::vec3(1.0f);
-    float velocity = 0.0f;
+    glm::vec2 velocity = glm::vec2(0.0f);
+    CollisionAreaType collisionType = RECTANGULAR;
     float rotation = 0.0f;
     bool isBreakable = false;
     bool disabled = false;
@@ -29,6 +43,7 @@ typedef struct {
 typedef struct {
     std::vector<GameObject> tiles;
     std::array<unsigned int, 2> size = {16, 16};
+    glm::vec2 tileSize = glm::vec2(10.0f);
 } GameMap;
 
 unsigned int _extract_int_from_string (std::string text, char separator, unsigned int *index = 0) {
@@ -104,6 +119,60 @@ GameMap loadMap(
     map = handleMapObjects(tileData, texture_keys, textures, gameCanvas);
 
     return map;
+}
+
+Direction vectorDirection(glm::vec2 target) {
+    glm::vec2 compass[] = {
+        glm::vec2(0.0f, 1.0f),      // up
+        glm::vec2(1.0f, 0.0f),      // right
+        glm::vec2(0.0f, -1.0f),     // down
+        glm::vec2(-1.0f, 0.0f),     // left
+    };
+
+    float max = 0.0f;
+    unsigned int best_match = -1;
+    for (unsigned int i = 0; i < 4; i++) {
+        float dot_product = glm::dot(glm::normalize(target), compass[i]);
+        if (dot_product > max) {
+            max = dot_product;
+            best_match = i;
+        }
+    }
+    return (Direction) best_match;
+}
+
+Collision checkCollision(GameObject one, GameObject two) {
+    if (one.collisionType == CIRCULAR && two.collisionType == CIRCULAR) {
+        return std::make_tuple(false, UP, glm::vec2(0.0f));
+    } else if (one.collisionType == CIRCULAR || two.collisionType == CIRCULAR) {
+        GameObject circObj = one.collisionType == CIRCULAR ? one : two;
+        GameObject rectObj = one.collisionType == CIRCULAR ? two : one;
+        float circRadius = circObj.size.x * 0.5f;
+
+        glm::vec2 center(circObj.position + circRadius);
+
+        glm::vec2 aabb_half_extents(rectObj.size.x * 0.5f, rectObj.size.y * 0.5f);
+        glm::vec2 aabb_center(
+            rectObj.position.x + aabb_half_extents.x,
+            rectObj.position.y + aabb_half_extents.y
+        );
+        glm::vec2 diff = center - aabb_center;
+        glm::vec2 clamped = glm::clamp(diff, -aabb_half_extents, aabb_half_extents);
+        glm::vec2 closest = aabb_center + clamped;
+        diff = closest - center;
+
+        if (glm::length(diff) <= circRadius)
+            return std::make_tuple(true, vectorDirection(diff), diff);
+        else
+            return std::make_tuple(false, UP, glm::vec2(0.0f));
+    } else {
+        bool collisionX = one.position.x + one.size.x >= two.position.x &&
+        two.position.x + two.size.x >= one.position.x;
+        bool collisionY = one.position.y + one.size.y >= two.position.y &&
+        two.position.y + two.size.y >= one.position.y;
+
+        return std::make_tuple(collisionX && collisionY, DOWN, glm::vec2(1.0f, 1.0f));
+    }
 }
 
 void drawMap(SpriteRenderer renderer, GameMap map) {
