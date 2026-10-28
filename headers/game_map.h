@@ -34,6 +34,7 @@ typedef struct {
     glm::vec3 color = glm::vec3(1.0f);
     glm::vec2 velocity = glm::vec2(0.0f);
     CollisionAreaType collisionType = RECTANGULAR;
+    glm::vec4 collisionArea = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f); // [x, y, w, h]
     float rotation = 0.0f;
     bool isBreakable = false;
     bool disabled = false;
@@ -122,7 +123,7 @@ GameMap loadMap(
 }
 
 Direction vectorDirection(glm::vec2 target) {
-    glm::vec2 compass[] = {
+        glm::vec2 compass[] = {
         glm::vec2(0.0f, 1.0f),      // up
         glm::vec2(1.0f, 0.0f),      // right
         glm::vec2(0.0f, -1.0f),     // down
@@ -141,21 +142,44 @@ Direction vectorDirection(glm::vec2 target) {
     return (Direction) best_match;
 }
 
-Collision checkCollision(GameObject one, GameObject two) {
+Collision checkCollision(const GameObject& one, const GameObject& two) {
+    const glm::vec2 pos1(
+        one.position.x + one.size.x * one.collisionArea.x,
+        one.position.y + one.size.y * one.collisionArea.y
+    );
+    const glm::vec2 pos2(
+        two.position.x + two.size.x * two.collisionArea.x,
+        two.position.y + two.size.y * two.collisionArea.y
+    );
+
+    const glm::vec2 size1(
+        one.size.x * one.collisionArea.z,
+        one.size.y * one.collisionArea.w
+    );
+    const glm::vec2 size2(
+        two.size.x * two.collisionArea.z,
+        two.size.y * two.collisionArea.w
+    );
+
     if (one.collisionType == CIRCULAR && two.collisionType == CIRCULAR) {
         return std::make_tuple(false, UP, glm::vec2(0.0f));
     } else if (one.collisionType == CIRCULAR || two.collisionType == CIRCULAR) {
-        GameObject circObj = one.collisionType == CIRCULAR ? one : two;
-        GameObject rectObj = one.collisionType == CIRCULAR ? two : one;
-        float circRadius = circObj.size.x * 0.5f;
+        const bool firstIsCircle = one.collisionType == CIRCULAR;
+        const glm::vec2 circlePos = firstIsCircle ? pos1 : pos2;
+        const glm::vec2 circleSize = firstIsCircle ? size1 : size2;
+        const glm::vec2 rectPos = firstIsCircle ? pos2 : pos1;
+        const glm::vec2 rectSize = firstIsCircle ? size2 : size1;
 
-        glm::vec2 center(circObj.position + circRadius);
+        const float circRadius = circleSize.x * 0.5f;
 
-        glm::vec2 aabb_half_extents(rectObj.size.x * 0.5f, rectObj.size.y * 0.5f);
-        glm::vec2 aabb_center(
-            rectObj.position.x + aabb_half_extents.x,
-            rectObj.position.y + aabb_half_extents.y
+        const glm::vec2 center = circlePos + glm::vec2(circRadius);
+
+        glm::vec2 aabb_half_extents = rectSize * 0.5f;
+        glm::vec2 aabb_center = glm::vec2(
+            rectPos.x + aabb_half_extents.x,
+            rectPos.y + aabb_half_extents.y
         );
+
         glm::vec2 diff = center - aabb_center;
         glm::vec2 clamped = glm::clamp(diff, -aabb_half_extents, aabb_half_extents);
         glm::vec2 closest = aabb_center + clamped;
@@ -166,12 +190,18 @@ Collision checkCollision(GameObject one, GameObject two) {
         else
             return std::make_tuple(false, UP, glm::vec2(0.0f));
     } else {
-        bool collisionX = one.position.x + one.size.x >= two.position.x &&
-        two.position.x + two.size.x >= one.position.x;
-        bool collisionY = one.position.y + one.size.y >= two.position.y &&
-        two.position.y + two.size.y >= one.position.y;
+        bool collisionX = pos1.x + size1.x >= pos2.x && pos2.x + size2.x >= pos1.x;
+        bool collisionY = pos1.y + size1.y >= pos2.y && pos2.y + size2.y >= pos1.y;
 
-        return std::make_tuple(collisionX && collisionY, DOWN, glm::vec2(1.0f, 1.0f));
+        if (collisionX && collisionY) {
+            const glm::vec2 center1 = pos1 + size1 * 0.5f;
+            const glm::vec2 center2 = pos2 + size2 * 0.5f;
+
+            const glm::vec2 delta = center1 - center2;
+
+            return std::make_tuple(true, vectorDirection(delta), delta);
+        }
+        return std::make_tuple(false, UP, glm::vec2(0.0f));
     }
 }
 

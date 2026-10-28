@@ -77,13 +77,21 @@ Game initGame(bool fullWindow) {
     game.Maps.push_back(map1);
     glm::vec2 playerPos = glm::vec2(game.canvas.width / 2 - PLAYER_SIZE.x / 2, game.canvas.height - PLAYER_SIZE.y);
     GameObject player = {
-        .position = playerPos, .size = PLAYER_SIZE, .spriteOffset = glm::vec2(64.0f, 144.0f), .spriteSize = glm::vec2(32.0f, 16.0f),
+        .position = playerPos,
+        .size = PLAYER_SIZE,
+        .spriteOffset = glm::vec2(64.0f, 144.0f),
+        .spriteSize = glm::vec2(32.0f, 16.0f),
         .texture=game.Textures[".\\textures\\18-Initial_TileSet.png"]
     };
     glm::vec2 ballPos = playerPos + glm::vec2(PLAYER_SIZE.x / 2.0f - 10.0f, 0.0f);
     GameObject ball = {
-        .position = ballPos, .size = glm::vec2(20.0f, 20.0f), .spriteOffset = glm::vec2(64.0f, 96.0f),
-        .spriteSize = glm::vec2(12.0f, 12.0f), .velocity = INITIAL_BALL_VELOCITY, .collisionType = CIRCULAR, .disabled = true,
+        .position = ballPos,
+        .size = glm::vec2(20.0f, 20.0f),
+        .spriteOffset = glm::vec2(64.0f, 96.0f),
+        .spriteSize = glm::vec2(12.0f, 12.0f),
+        .velocity = INITIAL_BALL_VELOCITY,
+        .collisionType = CIRCULAR,
+        .disabled = true,
         .texture=game.Textures[".\\textures\\18-Initial_TileSet.png"]
     };
     game.Objects["player"] = player;
