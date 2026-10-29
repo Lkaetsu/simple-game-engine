@@ -1,5 +1,5 @@
-#ifndef SGE_GAME_MAP
-#define SGE_GAME_MAP
+#ifndef SGE_GAME_MAP_H
+#define SGE_GAME_MAP_H
 
 #include <map>
 #include <array>
